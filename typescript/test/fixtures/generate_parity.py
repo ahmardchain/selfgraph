@@ -829,6 +829,9 @@ def obsidian_case():
         _ent("thing:acme", "ACME", "Thing"),
         _ent("thing:slash", "A/B: c?", "Thing"),
         _ent("thing:dots", " ..", "Thing"),
+        _ent("thing:long", "B" * 300, "Thing"),
+        _ent("thing:multi", "é" * 150, "Thing"),
+        _ent("thing:split", "B" * 199 + "é" + "B" * 100, "Thing"),
     ]
     relations = [
         _rel("relation:w", "person:ann", "WORKS_AT", "company:acme", role="cto", since=2020),

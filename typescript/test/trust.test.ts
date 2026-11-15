@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { toOssie } from "../src/export.js";
+import { obsidianVault, toOssie } from "../src/export.js";
 import {
   type Embedder,
   type Entity,
@@ -267,6 +267,30 @@ function suite(spec: StoreSpec): void {
     );
   });
 
+  it("bounds long names to writable file names in an Obsidian vault", async () => {
+    const g = open();
+    await g.insert.facts({
+      entities: [
+        { type: "Thing", name: "Ok" },
+        { type: "Thing", name: "B".repeat(300) },
+        { type: "Thing", name: "é".repeat(150) },
+        { type: "Thing", name: `${"B".repeat(199)}é${"B".repeat(100)}` },
+      ],
+    });
+    const vault = await g.exportObsidian();
+    expect(Object.keys(vault).sort()).toEqual([
+      `${"B".repeat(199)}.md`,
+      `${"B".repeat(200)}.md`,
+      "Ok.md",
+      `${"é".repeat(100)}.md`,
+    ]);
+    for (const key of Object.keys(vault)) {
+      expect(Buffer.byteLength(key, "utf8")).toBeLessThanOrEqual(255);
+      expect(key).not.toContain("\ufffd");
+    }
+    expect(vault[`${"B".repeat(200)}.md`]).toContain(`# ${"B".repeat(300)}\n`);
+  });
+
   const merged = async () => {
     const g = open({ extractor: lineExtractor });
     await g.insert.facts({ entities: [{ type: "Thing", name: "acme", aliases: ["acmecorp"] }] });
@@ -415,6 +439,25 @@ describe("trust rules without a store", () => {
     const blocked = pprRank(seeds, nodes, rels, new Set(["thing:h"]));
     expect(blocked.get("thing:0")!).toBeLessThan(blocked.get("thing:b")!);
     expect(blocked.get("thing:h")).toBe(1);
+  });
+
+  it("numbers vault stems that collide after truncation", () => {
+    const vault = obsidianVault(
+      [
+        entity("0", "B".repeat(300)),
+        entity(`1${"B".repeat(300)}`, `${"B".repeat(300)}x`),
+        entity(`1${"B".repeat(300)}x`, `${"B".repeat(300)}y`),
+      ],
+      [],
+      [],
+      [],
+    );
+    expect(Object.keys(vault).sort()).toEqual([
+      `1${"B".repeat(199)} 2.md`,
+      `1${"B".repeat(199)}.md`,
+      `${"B".repeat(200)}.md`,
+    ]);
+    for (const key of Object.keys(vault)) expect(Buffer.byteLength(key, "utf8")).toBeLessThanOrEqual(255);
   });
 
   it("logs every schema field the Ossie export leaves out", async () => {

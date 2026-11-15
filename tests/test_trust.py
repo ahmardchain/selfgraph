@@ -331,6 +331,33 @@ def test_obsidian_vault_writes_a_note_per_entity_and_decision():
     assert obsidian_vault([], [], [], []) == {}
 
 
+def test_obsidian_vault_truncates_long_names_to_writable_file_names():
+    entities = [
+        Entity(id="thing:ok", type="Thing", name="Ok", created_at=T0, updated_at=T0),
+        Entity(id="thing:long", type="Thing", name="B" * 300, created_at=T0, updated_at=T0),
+        Entity(id="thing:multi", type="Thing", name="é" * 150, created_at=T0, updated_at=T0),
+        Entity(id="thing:split", type="Thing", name="B" * 199 + "é" + "B" * 100, created_at=T0, updated_at=T0),
+    ]
+    vault = obsidian_vault(entities, [], [], [])
+    assert sorted(vault) == ["B" * 199 + ".md", "B" * 200 + ".md", "Ok.md", "é" * 100 + ".md"]
+    for key in vault:
+        assert len(key.encode("utf-8")) <= 255
+        assert "\ufffd" not in key
+    assert vault["B" * 200 + ".md"].endswith(f"# {'B' * 300}\n")
+
+
+def test_obsidian_vault_numbers_stems_that_collide_after_truncation():
+    entities = [
+        Entity(id="0", type="Thing", name="B" * 300, created_at=T0, updated_at=T0),
+        Entity(id="1" + "B" * 300, type="Thing", name="B" * 300 + "x", created_at=T0, updated_at=T0),
+        Entity(id="1" + "B" * 300 + "x", type="Thing", name="B" * 300 + "y", created_at=T0, updated_at=T0),
+    ]
+    vault = obsidian_vault(entities, [], [], [])
+    assert sorted(vault) == ["1" + "B" * 199 + " 2.md", "1" + "B" * 199 + ".md", "B" * 200 + ".md"]
+    for key in vault:
+        assert len(key.encode("utf-8")) <= 255
+
+
 def test_cypher_names_reads_labels_types_and_name_literals():
     query = "MATCH (n:Person:`Big Co` {name: 'Ann'})-[r:WORKS_AT|:KNOWS]->(c) WHERE c.name = \"acme\" RETURN n"
     assert cypher_names(query) == (["Person", "Big Co"], ["WORKS_AT", "KNOWS"], ["Ann", "acme"])

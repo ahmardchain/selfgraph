@@ -3,7 +3,7 @@ import { normalizeRelType } from "./ids.js";
 import { casefold } from "./internal/casefold.js";
 import { dumps } from "./internal/json.js";
 import { log } from "./internal/log.js";
-import { comparePy, pyFloatRepr, pyStrip } from "./internal/py.js";
+import { comparePy, pyFloatRepr, pyStrip, utf8 } from "./internal/py.js";
 import type { DecisionTrace, Entity, JsonObject, Preference, Relation } from "./models.js";
 import { asSchema, type ParsedSchema, type Schema } from "./schema.js";
 
@@ -20,6 +20,7 @@ const OSSIE_TYPES: Record<string, string> = {
 };
 // biome-ignore lint/suspicious/noControlCharactersInRegex: file names must not hold control characters
 const UNSAFE = /[\\/:*?"<>|#^[\]\x00-\x1f]/g;
+const MAX_STEM_BYTES = 200;
 
 /**
  * Compare string tuples element by element in Python order.
@@ -134,13 +135,39 @@ export function toOssie(raw: Schema | ParsedSchema): Obj {
 }
 
 /**
+ * Cut text to a UTF-8 byte budget, landing on a code-point boundary so no multi-byte character is split.
+ *
+ * @param text (string): the text.
+ * @param budget (number): the byte budget.
+ * @return (string): the longest prefix that fits the budget.
+ */
+function truncateUtf8(text: string, budget: number): string {
+  let bytes = 0;
+  let end = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    const size = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    if (bytes + size > budget) break;
+    bytes += size;
+    end += ch.length;
+  }
+  return text.slice(0, end);
+}
+
+/**
  * Make a note file name from text, replacing the characters file systems or Obsidian links reject.
+ *
+ * The stem is cut to a byte budget so the file name stays within the 255-byte component limit once
+ * the extension and a numbering suffix are added; the cut lands on a code-point boundary, so no
+ * multi-byte character is split, and trailing dots and space are stripped again after the cut.
  *
  * @param text (string): the name.
  * @return (string): the file name without extension, or "" when nothing usable is left.
  */
 function stem(text: string): string {
-  return pyStrip(pyStrip(pyStrip(text.replace(UNSAFE, "-")), "."));
+  const cleaned = pyStrip(pyStrip(pyStrip(text.replace(UNSAFE, "-")), "."));
+  if (utf8(cleaned).length <= MAX_STEM_BYTES) return cleaned;
+  return pyStrip(pyStrip(pyStrip(truncateUtf8(cleaned, MAX_STEM_BYTES)), "."));
 }
 
 /**
